@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MindEase AI ⚡</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Orbitron&family=Inter&display=swap" rel="stylesheet">
+
+<style>
+body{margin:0;font-family:'Inter';background:#020617;color:white;display:flex;height:100vh;}
+.sidebar{width:230px;background:rgba(0,0,0,0.6);padding:15px;}
+.sidebar button{width:100%;margin:5px 0;}
+.main{flex:1;display:flex;flex-direction:column;}
+#chat{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;}
+.msg{max-width:75%;padding:10px;margin:5px;border-radius:10px;}
+.user{align-self:flex-end;background:#334155;}
+.bot{align-self:flex-start;border:1px solid #00f2ff55;}
+.input-area{display:flex;padding:10px;gap:5px;background:#020617;}
+input{flex:1;padding:10px;border-radius:10px;background:#020617;color:white;border:none;}
+button{padding:10px;border:none;border-radius:8px;background:linear-gradient(45deg,#00f2ff,#7000ff);color:white;}
+</style>
+</head>
+
+<body>
+
+<div class="sidebar">
+<h2>MindEase ⚡</h2>
+
+<button onclick="toggleCall()">📞 Call</button>
+<button onclick="toggleLang()">🌐 UI</button>
+
+<button onclick="setVoice('female')">👩 Female</button>
+<button onclick="setVoice('male')">👨 Male</button>
+
+<button onclick="setTone('calm')">😌 Calm</button>
+<button onclick="setTone('fast')">⚡ Fast</button>
+</div>
+
+<div class="main">
+
+<div id="chat">
+<div class="msg bot">Ready bro 😎</div>
+</div>
+
+<div class="input-area">
+<input id="input" placeholder="Type or speak..." />
+<button onclick="startVoice()">🎤</button>
+<button onclick="stopAll()">⏹️</button>
+<button onclick="send()">➤</button>
+</div>
+
+</div>
+
+<script>
+let messages=[];
+let recognition;
+let isListening=false;
+let callMode=false;
+let voiceType="female";
+let tone="calm";
+let currentLang="en";
+let voices=[];
+
+window.speechSynthesis.onvoiceschanged=()=>{
+  voices=window.speechSynthesis.getVoices();
+};
+
+// 🌐 UI
+function toggleLang(){
+  currentLang=currentLang==="en"?"hi":"en";
+  document.getElementById("input").placeholder=
+    currentLang==="hi"?"Yahan likho ya bolo...":"Type or speak...";
+}
+
+// 🎤 VOICE INPUT + HINDI CONVERT
+async function startVoice(){
+  if(isListening) return;
+
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  recognition=new SR();
+
+  recognition.lang="en-IN";
+  isListening=true;
+
+  recognition.onresult=async(e)=>{
+    let text=e.results[0][0].transcript;
+
+    const hindiWords=["hai","kya","tum","mujhe","kyu","kaise","acha","nahi"];
+    const isHindi=hindiWords.some(w=>text.toLowerCase().includes(w));
+
+    if(isHindi){
+      try{
+        const res=await fetch("/api/convert-hindi",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({text})
+        });
+        const data=await res.json();
+        text=data.hindi || text;
+      }catch{}
+    }
+
+    document.getElementById("input").value=text;
+    send();
+  };
+
+  recognition.onend=()=>{isListening=false;};
+  recognition.start();
+}
+
+// 📞 CALL MODE
+function toggleCall(){
+  callMode=!callMode;
+  if(callMode) startVoice();
+}
+
+// 🧠 LANGUAGE DETECT
+function detectLang(text){
+  return /[\u0900-\u097F]/.test(text)?"hi-IN":"en-IN";
+}
+
+// 🎭 EMOTION
+function detectEmotion(text){
+  text=text.toLowerCase();
+  if(text.includes("sad")||text.includes("low")) return "sad";
+  if(text.includes("happy")) return "happy";
+  return "normal";
+}
+
+// 🔊 SPEAK
+function speak(text){
+  window.speechSynthesis.cancel();
+
+  const speech=new SpeechSynthesisUtterance(text);
+
+  speech.lang=detectLang(text);
+
+  const emotion=detectEmotion(text);
+
+  speech.rate = tone==="calm"?0.9:1.2;
+  if(emotion==="sad") speech.rate=0.8;
+
+  const voice = voices.find(v=>v.lang.includes(speech.lang));
+  speech.voice = voice || voices[0];
+
+  speech.onend=()=>{
+    if(callMode) startVoice();
+  };
+
+  window.speechSynthesis.speak(speech);
+}
+
+// STOP
+function stopAll(){
+  callMode=false;
+  window.speechSynthesis.cancel();
+  if(recognition) recognition.stop();
+}
+
+// TYPE EFFECT
+function typeEffect(el,text){
+  let i=0;
+  function typing(){
+    if(i<text.length){
+      el.innerText=text.slice(0,i+1);
+      i++;
+      setTimeout(typing,18);
+    }
+  }
+  typing();
+}
+
+// ADD MSG
+function addMsg(text,type){
+  const chat=document.getElementById("chat");
+  const div=document.createElement("div");
+  div.className="msg "+type;
+  chat.appendChild(div);
+  chat.scrollTop=chat.scrollHeight;
+
+  if(type==="bot"){
+    typeEffect(div,text);
+    setTimeout(()=>speak(text),100);
+  } else {
+    div.innerText=text;
+  }
+}
+
+// SEND
+async function send(){
+  const input=document.getElementById("input");
+  if(!input.value.trim()) return;
+
+  const msg=input.value;
+  addMsg(msg,"user");
+
+  messages.push({role:"user",parts:[{text:msg}]});
+  input.value="";
+
+  const res=await fetch("/api/chat",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({messages})
+  });
+
+  const data=await res.json();
+  addMsg(data.reply,"bot");
+
+  messages.push({role:"model",parts:[{text:data.reply}]});
+}
+
+document.getElementById("input").addEventListener("keypress",e=>{
+  if(e.key==="Enter") send();
+});
+</script>
+
+</body>
+</html>
